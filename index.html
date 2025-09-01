@@ -936,6 +936,10 @@
             scriptUrl: ''
         };
 
+        // Variáveis de autenticação
+        let isAdminAuthenticated = false;
+        let authTimeout = null;
+
         // Inicialização
         document.addEventListener('DOMContentLoaded', function() {
             initializeApp();
@@ -956,26 +960,73 @@
         function loadConfiguration() {
             try {
                 const config = JSON.parse(localStorage.getItem('portalConfig')) || DEFAULT_CONFIG;
+                
+                // Se não há configuração salva, cria uma nova com senha padrão
+                if (!localStorage.getItem('portalConfig')) {
+                    localStorage.setItem('portalConfig', JSON.stringify(DEFAULT_CONFIG));
+                }
+                
                 document.getElementById('sheet-id').value = config.sheetId || '';
                 document.getElementById('script-url').value = config.scriptUrl || '';
             } catch (e) {
                 console.error('Erro ao carregar configuração:', e);
+                // Reseta configuração se houver erro
+                localStorage.setItem('portalConfig', JSON.stringify(DEFAULT_CONFIG));
             }
         }
 
         function saveConfiguration() {
+            if (!checkAdminAuth()) return;
+            
+            // Carrega configuração atual para preservar a senha
+            const currentConfig = JSON.parse(localStorage.getItem('portalConfig')) || DEFAULT_CONFIG;
+            
             const config = {
-                adminPassword: DEFAULT_CONFIG.adminPassword,
+                adminPassword: currentConfig.adminPassword, // Preserva a senha atual
                 sheetId: document.getElementById('sheet-id').value.trim(),
                 scriptUrl: document.getElementById('script-url').value.trim()
             };
 
             try {
                 localStorage.setItem('portalConfig', JSON.stringify(config));
-                showMessage('Configuração salva com sucesso!', 'success');
+                showMessage('⚙️ Configuração salva com sucesso!', 'success');
+                setAuthTimeout(); // Renova sessão
             } catch (e) {
-                showMessage('Erro ao salvar configuração: ' + e.message, 'error');
+                showMessage('❌ Erro ao salvar configuração: ' + e.message, 'error');
             }
+        }
+
+        function changeAdminPassword() {
+            if (!checkAdminAuth()) return;
+            
+            const currentPassword = prompt('Digite a senha atual:');
+            if (!currentPassword) return;
+            
+            const config = JSON.parse(localStorage.getItem('portalConfig')) || DEFAULT_CONFIG;
+            if (currentPassword !== config.adminPassword) {
+                showMessage('❌ Senha atual incorreta!', 'error');
+                return;
+            }
+            
+            const newPassword = prompt('Digite a nova senha (mínimo 6 caracteres):');
+            if (!newPassword) return;
+            
+            if (newPassword.length < 6) {
+                showMessage('❌ A senha deve ter pelo menos 6 caracteres!', 'error');
+                return;
+            }
+            
+            const confirmPassword = prompt('Confirme a nova senha:');
+            if (newPassword !== confirmPassword) {
+                showMessage('❌ As senhas não coincidem!', 'error');
+                return;
+            }
+            
+            // Salva nova senha
+            config.adminPassword = newPassword;
+            localStorage.setItem('portalConfig', JSON.stringify(config));
+            showMessage('✅ Senha alterada com sucesso!', 'success');
+            setAuthTimeout(); // Renova sessão
         }
 
         // Gestão de telas
@@ -984,6 +1035,11 @@
             document.getElementById('admin-login').style.display = 'none';
             document.getElementById('admin-panel').style.display = 'none';
             clearForm();
+            
+            // Limpa autenticação ao sair da área admin
+            if (isAdminAuthenticated) {
+                logoutAdmin();
+            }
         }
 
         function showAdminLogin() {
@@ -992,13 +1048,21 @@
             document.getElementById('admin-panel').style.display = 'none';
             document.getElementById('admin-password').value = '';
             document.getElementById('admin-password').focus();
+            
+            // Reseta estado de autenticação
+            isAdminAuthenticated = false;
         }
 
         function showAdminPanel() {
+            if (!checkAdminAuth()) return;
+            
             document.getElementById('main-screen').style.display = 'none';
             document.getElementById('admin-login').style.display = 'none';
             document.getElementById('admin-panel').style.display = 'block';
             loadAdminData();
+            
+            // Renova timeout da sessão
+            setAuthTimeout();
         }
 
         // Seleção de tipo de usuário
@@ -1166,6 +1230,8 @@
 
         // Admin - registro de visitantes
         function adminRegisterVisitor(movement) {
+            if (!checkAdminAuth()) return;
+            
             const name = document.getElementById('admin-visitor-name').value.trim();
             if (!name) {
                 showMessage('Por favor, informe o nome do visitante.', 'error');
@@ -1187,6 +1253,8 @@
             document.getElementById('admin-visitor-name').value = '';
             document.getElementById('admin-visitor-phone').value = '';
             document.getElementById('admin-visitor-guardian').value = '';
+            
+            setAuthTimeout(); // Renova sessão
         }
 
         // Armazenamento local
@@ -1298,13 +1366,60 @@
             const password = document.getElementById('admin-password').value;
             const config = JSON.parse(localStorage.getItem('portalConfig')) || DEFAULT_CONFIG;
             
+            if (!password) {
+                showMessage('Por favor, digite a senha.', 'warning');
+                document.getElementById('admin-password').focus();
+                return;
+            }
+            
             if (password === config.adminPassword) {
+                isAdminAuthenticated = true;
+                setAuthTimeout();
                 showAdminPanel();
+                showMessage('Acesso autorizado! Bem-vindo, administrador.', 'success');
             } else {
-                showMessage('Senha incorreta!', 'error');
+                showMessage('❌ Senha incorreta! Acesso negado.', 'error');
                 document.getElementById('admin-password').value = '';
                 document.getElementById('admin-password').focus();
+                
+                // Adiciona um pequeno delay por segurança
+                setTimeout(() => {
+                    document.getElementById('admin-password').disabled = false;
+                }, 1000);
+                document.getElementById('admin-password').disabled = true;
             }
+        }
+
+        // Gerenciamento de sessão administrativa
+        function setAuthTimeout() {
+            // Limpa timeout anterior
+            if (authTimeout) {
+                clearTimeout(authTimeout);
+            }
+            
+            // Define timeout de 30 minutos
+            authTimeout = setTimeout(() => {
+                logoutAdmin();
+                showMessage('Sessão administrativa expirou por segurança.', 'warning');
+            }, 30 * 60 * 1000); // 30 minutos
+        }
+
+        function logoutAdmin() {
+            isAdminAuthenticated = false;
+            if (authTimeout) {
+                clearTimeout(authTimeout);
+                authTimeout = null;
+            }
+            showMainScreen();
+        }
+
+        function checkAdminAuth() {
+            if (!isAdminAuthenticated) {
+                showMessage('❌ Acesso negado! Faça login como administrador.', 'error');
+                showAdminLogin();
+                return false;
+            }
+            return true;
         }
 
         // Carregamento de dados do admin
@@ -1468,6 +1583,8 @@
 
         // Edição de registros
         function editRecord(recordId) {
+            if (!checkAdminAuth()) return;
+            
             const record = currentRecords.find(r => r.id === recordId);
             if (!record) return;
 
@@ -1480,9 +1597,12 @@
             document.getElementById('edit-time').value = record.horario;
 
             document.getElementById('edit-modal').style.display = 'block';
+            setAuthTimeout(); // Renova sessão
         }
 
         function saveEdit() {
+            if (!checkAdminAuth()) return;
+            
             const recordIndex = currentRecords.findIndex(r => r.id === editingRecordId);
             if (recordIndex === -1) return;
 
@@ -1502,11 +1622,14 @@
             // Atualiza visualização
             loadAdminData();
             closeModal();
-            showMessage('Registro atualizado com sucesso!', 'success');
+            showMessage('✅ Registro atualizado com sucesso!', 'success');
+            setAuthTimeout(); // Renova sessão
         }
 
         function deleteRecord() {
-            if (!confirm('Tem certeza que deseja excluir este registro?')) return;
+            if (!checkAdminAuth()) return;
+            
+            if (!confirm('🗑️ Tem certeza que deseja excluir este registro?')) return;
 
             const recordIndex = currentRecords.findIndex(r => r.id === editingRecordId);
             if (recordIndex === -1) return;
@@ -1516,7 +1639,8 @@
             
             loadAdminData();
             closeModal();
-            showMessage('Registro excluído com sucesso!', 'success');
+            showMessage('🗑️ Registro excluído com sucesso!', 'success');
+            setAuthTimeout(); // Renova sessão
         }
 
         function closeModal() {
@@ -1656,8 +1780,29 @@
                 <h2>📊 Painel do Administrador</h2>
                 <div class="admin-actions">
                     <button class="btn btn-secondary" onclick="exportReport()">📄 Exportar Relatório</button>
-                    <button class="btn btn-secondary" onclick="clearAllData()">🗑️ Limpar Dados</button>
-                    <button class="btn btn-secondary" onclick="showMainScreen()">🏠 Voltar</button>
+                    <button class="btn btn-danger" onclick="clearAllData()">🗑️ Limpar Dados</button>
+                    <button class="btn btn-primary" onclick="changeAdminPassword()">🔒 Alterar Senha</button>
+                    <button class="btn btn-secondary" onclick="logoutAdmin()">🚪 Sair</button>
+                </div>
+            </div>
+
+            <!-- Seção de Segurança -->
+            <div class="config-section">
+                <h3>🔒 Segurança e Autenticação</h3>
+                <div style="background: #fff3cd; padding: 15px; border-radius: 8px; margin-bottom: 20px; border-left: 4px solid #ffc107;">
+                    <p style="margin: 0; color: #856404; font-weight: 600;">
+                        ⚠️ <strong>Informações de Segurança:</strong>
+                    </p>
+                    <ul style="margin: 10px 0 0 20px; color: #856404;">
+                        <li>Sessão administrativa expira automaticamente em 30 minutos</li>
+                        <li>Operações críticas requerem confirmação com senha</li>
+                        <li>Altere a senha padrão para maior segurança</li>
+                        <li>Faça logout sempre que terminar de usar o sistema</li>
+                    </ul>
+                </div>
+                <div class="button-group">
+                    <button class="btn btn-primary" onclick="changeAdminPassword()">🔑 Alterar Senha do Administrador</button>
+                    <button class="btn btn-secondary" onclick="showSecurityInfo()">ℹ️ Dicas de Segurança</button>
                 </div>
             </div>
 
