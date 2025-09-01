@@ -717,13 +717,18 @@
                         </div>
                     </div>
 
-                    <button class="btn btn-admin" onclick="showAdminLogin()">
+                    <button class="btn btn-admin" onclick="accessAdminArea()">
                         <span>⚙️</span> Área do Administrador
                     </button>
                 </div>
             </div>
 
             <div id="message-container"></div>
+            
+            <!-- Debug Info - Status de Autenticação -->
+            <div style="position: fixed; bottom: 10px; left: 10px; font-size: 0.8rem; color: #666; background: rgba(255,255,255,0.95); padding: 8px 12px; border-radius: 6px; border: 1px solid #ddd; box-shadow: 0 2px 8px rgba(0,0,0,0.1);" id="debug-info">
+                🔒 <strong>Status:</strong> <span id="auth-status">Não autenticado</span>
+            </div>
         </div>
 
         <!-- Tela de Login Admin -->
@@ -942,10 +947,25 @@
 
         // Inicialização
         document.addEventListener('DOMContentLoaded', function() {
+            console.log('🔒 Sistema de Portaria Iniciado - Modo Seguro Ativado');
             initializeApp();
         });
 
         function initializeApp() {
+            console.log('🚀 Inicializando Sistema de Portaria Escolar');
+            console.log('🔒 Configurando segurança...');
+            
+            // SEMPRE inicia sem autenticação administrativa
+            isAdminAuthenticated = false;
+            authTimeout = null;
+            
+            console.log('✅ Estado de segurança configurado:', {
+                authenticated: isAdminAuthenticated,
+                timeout: authTimeout
+            });
+            
+            updateDebugInfo(); // Atualiza status de debug
+            
             loadConfiguration();
             checkConnection();
             updateConnectionStatus();
@@ -954,6 +974,11 @@
             // Define data de hoje nos filtros
             const today = new Date().toISOString().split('T')[0];
             document.getElementById('search-date').value = today;
+            
+            // Garante que sempre começa na tela principal
+            showMainScreen();
+            
+            console.log('🎯 Sistema inicializado com sucesso');
         }
 
         // Gestão de configuração
@@ -1031,37 +1056,82 @@
 
         // Gestão de telas
         function showMainScreen() {
+            // Sempre limpa autenticação ao voltar para tela principal
+            isAdminAuthenticated = false;
+            if (authTimeout) {
+                clearTimeout(authTimeout);
+                authTimeout = null;
+            }
+            
+            updateDebugInfo(); // Atualiza debug
+            
             document.getElementById('main-screen').style.display = 'block';
             document.getElementById('admin-login').style.display = 'none';
             document.getElementById('admin-panel').style.display = 'none';
             clearForm();
+        }
+
+        // Função específica para acessar área administrativa
+        function accessAdminArea() {
+            console.log('🔑 Tentativa de acesso à área administrativa');
             
-            // Limpa autenticação ao sair da área admin
-            if (isAdminAuthenticated) {
-                logoutAdmin();
+            // SEMPRE reseta autenticação e força login
+            isAdminAuthenticated = false;
+            if (authTimeout) {
+                clearTimeout(authTimeout);
+                authTimeout = null;
             }
+            
+            updateDebugInfo();
+            console.log('🔒 Estado resetado. Redirecionando para login...');
+            
+            // SEMPRE mostra tela de login
+            showAdminLogin();
+            showMessage('🔐 Para acessar a área administrativa, digite a senha.', 'warning');
         }
 
         function showAdminLogin() {
+            console.log('🔒 Mostrando tela de login administrativa');
+            
+            // Garante que sempre está resetado
+            isAdminAuthenticated = false;
+            if (authTimeout) {
+                clearTimeout(authTimeout);
+                authTimeout = null;
+            }
+            
+            updateDebugInfo();
+            
+            // Mostra tela de login
             document.getElementById('main-screen').style.display = 'none';
             document.getElementById('admin-login').style.display = 'block';
             document.getElementById('admin-panel').style.display = 'none';
+            
+            // Limpa e foca no campo senha
             document.getElementById('admin-password').value = '';
             document.getElementById('admin-password').focus();
             
-            // Reseta estado de autenticação
-            isAdminAuthenticated = false;
+            console.log('✅ Tela de login exibida');
         }
 
         function showAdminPanel() {
-            if (!checkAdminAuth()) return;
+            console.log('🎯 Tentando acessar painel admin. Auth status:', isAdminAuthenticated);
             
+            // PROTEÇÃO CRÍTICA: NUNCA mostra o painel sem autenticação
+            if (!isAdminAuthenticated) {
+                console.log('❌ BLOQUEADO! Tentativa de acesso não autorizado ao painel');
+                showMessage('🚨 ACESSO BLOQUEADO! Faça login primeiro com a senha de administrador.', 'error');
+                showAdminLogin();
+                return;
+            }
+            
+            console.log('✅ Acesso autorizado - mostrando painel admin');
             document.getElementById('main-screen').style.display = 'none';
             document.getElementById('admin-login').style.display = 'none';
             document.getElementById('admin-panel').style.display = 'block';
             loadAdminData();
             
-            // Renova timeout da sessão
+            // Configura timeout da sessão
             setAuthTimeout();
         }
 
@@ -1363,30 +1433,59 @@
 
         // Login administrativo
         function adminLogin() {
+            console.log('🔐 Iniciando processo de login administrativo');
+            
             const password = document.getElementById('admin-password').value;
-            const config = JSON.parse(localStorage.getItem('portalConfig')) || DEFAULT_CONFIG;
             
             if (!password) {
-                showMessage('Por favor, digite a senha.', 'warning');
+                console.log('⚠️ Senha em branco');
+                showMessage('🔑 Por favor, digite a senha para continuar.', 'warning');
                 document.getElementById('admin-password').focus();
                 return;
             }
             
+            console.log('🔍 Verificando senha...');
+            
+            // Carrega configuração para verificar senha
+            let config;
+            try {
+                config = JSON.parse(localStorage.getItem('portalConfig')) || DEFAULT_CONFIG;
+            } catch (e) {
+                console.error('Erro ao carregar configuração:', e);
+                config = DEFAULT_CONFIG;
+            }
+            
+            // Verifica se a senha está correta
             if (password === config.adminPassword) {
+                console.log('✅ SENHA CORRETA! Autenticando usuário...');
+                
+                // Autenticação bem-sucedida
                 isAdminAuthenticated = true;
-                setAuthTimeout();
-                showAdminPanel();
-                showMessage('Acesso autorizado! Bem-vindo, administrador.', 'success');
+                updateDebugInfo(); // Atualiza debug
+                document.getElementById('admin-password').value = ''; // Limpa campo
+                
+                console.log('🎯 Redirecionando para painel administrativo...');
+                showAdminPanel(); // Agora pode mostrar o painel
+                showMessage('✅ Login realizado com sucesso! Bem-vindo, administrador.', 'success');
             } else {
-                showMessage('❌ Senha incorreta! Acesso negado.', 'error');
+                console.log('❌ SENHA INCORRETA!');
+                
+                // Senha incorreta
+                showMessage('❌ Senha incorreta! Acesso negado ao painel administrativo.', 'error');
                 document.getElementById('admin-password').value = '';
                 document.getElementById('admin-password').focus();
                 
-                // Adiciona um pequeno delay por segurança
+                // Bloqueia temporariamente o campo por segurança
+                const passwordField = document.getElementById('admin-password');
+                passwordField.disabled = true;
+                passwordField.placeholder = '🚫 Aguarde 3 segundos...';
+                
                 setTimeout(() => {
-                    document.getElementById('admin-password').disabled = false;
-                }, 1000);
-                document.getElementById('admin-password').disabled = true;
+                    passwordField.disabled = false;
+                    passwordField.placeholder = 'Digite a senha de acesso';
+                    passwordField.focus();
+                    console.log('🔓 Campo senha desbloqueado');
+                }, 3000);
             }
         }
 
